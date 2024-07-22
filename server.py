@@ -13,8 +13,16 @@ def read_root():
 
 
 @app.get("/provide/vod/")
-async def serve(ac: Union[str, None] = None, ids: Union[int, None] = None,pg: Union[int, None] = None,wd: Union[str, None] = None):
-    await jabel.get_class()
+async def serve(ac: Union[str, None] = None, ids: Union[int, None] = None,t: Union[int,str, None] = None,pg: Union[int, None] = None,wd: Union[str, None] = None):
+    if ac is None or ac=="list":
+        return await jabel.get_class()
+    if ac=="detail":
+        if ids:
+            return await jabel.get_video(ids)
+        elif wd:
+            return await jabel.search_video()
+        else:
+            return await jabel.get_videos_by_class(t,pg)
     return {"ac": ac, "ids": ids,"pg":pg, "wd":wd}
 
 
