@@ -12,7 +12,9 @@ class Jable(object):
         self.db =db
         self.user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         self.cookie = ""
+        self.categories="categories"
         self.classes=["latest-updates","new-release","hot"]
+        self.classes_name=["最近更新","全新上市","最热"]
         self.mapping={}
         pass
 
@@ -48,10 +50,23 @@ class Jable(object):
 
     async def get_class(self):
         class_list=[]
-        class_list.append({"type_id": 1, "type_name": '最近更新'})
-        class_list.append({"type_id": 2, "type_name": '全新上市'})
-        class_list.append({"type_id": 3, "type_name": '最热'})
         video_list=[]
+        result = await self.__get_request(f"{self.url}/{self.categories}/",{})
+        if result:
+            soup = BeautifulSoup(result, 'html.parser')
+            classes = soup.select("div.video-img-box")
+            for new_class in classes:
+                url = new_class.find("a")["href"]
+                match = re.search(r"\/(categories\/.*)\/",url)
+                if match:
+                    new_class_name=match[1]
+                    name = new_class.find(["h1","h2","h3","h4","h5","h6"]).get_text()
+                    if new_class_name not in self.classes:
+                        self.classes.append(new_class_name)
+                        self.classes_name.append(name)
+        for i in range(0,len(self.classes)):
+            class_list.append({"type_id":i+1,"type_name": self.classes_name[i]})
+
         result = await self.__get_request(self.url+"/latest-updates/",{})
         if result:
             soup = BeautifulSoup(result, 'html.parser')
@@ -86,6 +101,7 @@ class Jable(object):
         video_list=[]
         url_key_word=""
         if class_id:
+            class_id=int(class_id)
             if class_id>len(self.classes):
                 class_id=1
                 url_key_word=self.classes[class_id-1]
@@ -129,6 +145,45 @@ class Jable(object):
             "list": video_list,
         }
         return resp_data
+
+    async def search_video(self,keyword,page):
+        video_list=[]
+        if not page:
+            page=1
+
+        result = await self.__get_request(f"{self.url}/search/{keyword}/{page}/",{})
+        if result:
+            soup = BeautifulSoup(result, 'html.parser')
+            videos = soup.select("div.video-img-box")
+            for video in videos:
+                url = video.find("a")["href"]
+                img = video.find("img")["data-src"]
+                name = video.find("h6").get_text().strip()
+                extra = ""
+                vod_id = self.__name_to_id(re.search(r"videos\/(.*)\/",url)[1])
+                if not vod_id:
+                    print(f"Fail to parse {url} skipped")
+                    continue
+                video_info = {
+                    "vod_id":int(vod_id),
+                    "vod_pic":img,
+                    "vod_name":name,
+                    "vod_remarks":extra
+                }
+                video_list.append(video_info)
+            last_page_link = soup.select("a.page-link")[-1]["href"]
+            last_page_num = int(re.search(r"\/(\d+)\/$",last_page_link)[1])
+        resp_data ={
+            "code":1,
+            "msg": "数据列表",
+            "page": page,
+            "pagecount": last_page_num,
+            "limit": str(len(video_list)),
+            "total": len(video_list)*last_page_num,
+            "list": video_list,
+        }
+        return resp_data
+
 
     async def get_video(self,video_id):
         video_name = self.__id_to_name(video_id)
@@ -206,8 +261,24 @@ class Jable(object):
                     self.mapping[info[1]]=info[0]
             except Exception as e:
                 self.__init_db()
-        prefix = name.split("-")[0]
-        num = name.split("-")[1]
+        parts = name.split("-")
+        if len(parts)==2:
+            prefix = parts[0]
+            num = parts[1]
+            extra=""
+        elif len(parts)==3:
+            prefix = parts[0]
+            num = parts[1]
+            extra=parts[2]
+        extra_num=""
+        if extra:
+            if len(extra)>1:
+                print(f"Cannot decode {name}, extra is {extra} which is too long")
+                return None
+            extra_num=str(ord(extra)).rjust(3,"0")
+        else:
+            extra_num="000"
+
         if self.mapping.get(prefix) is None:
             max_id=0
             max_id_query = self.db.execute(f"SELECT max(id) FROM jable").fetchone()
@@ -217,7 +288,7 @@ class Jable(object):
             self.db.commit()
             self.mapping[prefix]=max_id
         if self.mapping.get(prefix) is not None:
-            mapped_id = f"1{str(self.mapping.get(prefix)).rjust(3,'0')}{num}"
+            mapped_id = f"1{str(self.mapping.get(prefix)).rjust(3,'0')}{num}{extra_num}"
             return mapped_id
         return None
 
@@ -233,7 +304,8 @@ class Jable(object):
                 self.__init_db()
         id_tmp=str(id)
         prefix_num=id_tmp[1:4]
-        real_num=id_tmp[4:]
+        real_num=id_tmp[4:-3]
+        extra_num=int(id_tmp[-3:])
         prefix=""
         for pfx,num in self.mapping.items():
             if int(prefix_num)==num:
@@ -241,7 +313,10 @@ class Jable(object):
                 break
         int(prefix_num)
         if prefix:
-            return f"{prefix}-{real_num}"
+            if extra_num>0:
+                return f"{prefix}-{real_num}-{chr(extra_num)}"
+            else:
+                return f"{prefix}-{real_num}"
         return None
 
     def __init_db(self):

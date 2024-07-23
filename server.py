@@ -20,10 +20,10 @@ async def serve(ac: Union[str, None] = None, ids: Union[int, None] = None,t: Uni
         if ids:
             return await jabel.get_video(ids)
         elif wd:
-            return await jabel.search_video()
+            return await jabel.search_video(wd,pg)
         else:
             return await jabel.get_videos_by_class(t,pg)
-    return {"ac": ac, "ids": ids,"pg":pg, "wd":wd}
+    return {"code":0}
 
 
 if __name__ == "__main__":
